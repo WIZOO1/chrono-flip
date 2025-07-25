@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>ChronoFlip – Flip Time, Meet Your Ghost</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
+<style>
+  html,body{margin:0;height:100%;background:#000;font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+  #c{display:block;width:100%;height:100%;touch-action:manipulation}
+  #ui{position:fixed;bottom:4%;left:0;right:0;text-align:center;color:#fff;font-size:5vmin}
+  .btn{display:inline-block;background:#0ff;border:none;padding:2vmin 6vmin;border-radius:999px;color:#000;font-weight:700;font-size:4vmin;margin-top:2vmin;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="txt">Tap to REVERSE 1s</div>
+  <button class="btn" onclick="restart()">Restart</button>
+</div>
+<script>
+/* ---------- CONFIG ---------- */
+const W=800,H=600,DT=16;               // physics step
+const FLIP_DUR=1000;                   // reverse time length (ms)
+const COLORS={bg:'#111',player:'#0ff',ghost:'#0af',portal:'#0f0',wall:'#444'};
+/* ---------- CANVAS ---------- */
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+function resize(){c.width=window.innerWidth;c.height=window.innerHeight}
+window.addEventListener('resize',resize);resize();
+/* ---------- LEVEL ---------- */
+const walls=[[100,400,600,40],[300,200,40,200]]; // [x,y,w,h]
+const portal={x:700,y:80,r:30};
+/* ---------- PLAYER ---------- */
+let t=0,flipEnd=0,ghost=null;
+const player={x:50,y:H-50,w:20,h:20,vx:120,vy:0};
+const hist=[]; // record state every frame
+/* ---------- INPUT ---------- */
+c.addEventListener('pointerdown',()=>{
+  if(Date.now()>flipEnd){flipEnd=Date.now()+FLIP_DUR;ghost=hist.pop()||null;}
+});
+/* ---------- LOOP ---------- */
+function frame(){
+  t+=DT;
+  /* physics */
+  player.vy+=0.5; // gravity
+  player.x+=player.vx*(flipEnd>Date.now()?-1:1)*DT/1000;
+  player.y+=player.vy*DT/1000;
+  /* collision walls */
+  walls.forEach(([wx,wy,ww,wh])=>{
+    if(player.x<wx+ww && player.x+player.w>wx && player.y<wy+wh && player.y+player.h>wy){
+      player.vx*=-1;player.vy=Math.min(player.vy,0);
+    }
+  });
+  /* record history (only forward) */
+  if(Date.now()<flipEnd){hist.pop();}else{hist.push({...player});}
+  /* portal check */
+  const dx=player.x-portal.x,dy=player.y-portal.y;
+  if(Math.hypot(dx,dy)<portal.r && ghost && Math.hypot(player.x-ghost.x,player.y-ghost.y)<20){
+    document.getElementById('txt').innerText='🎉 Portal Open – Tap Restart';
+  }
+  /* draw */
+  ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,c.width,c.height);
+  walls.forEach(([x,y,w,h])=>{ctx.fillStyle=COLORS.wall;ctx.fillRect(x,y,w,h);});
+  ctx.beginPath();ctx.arc(portal.x,portal.y,portal.r,0,Math.PI*2);ctx.fillStyle=COLORS.portal;ctx.fill();
+  ctx.fillStyle=COLORS.player;ctx.fillRect(player.x,player.y,player.w,player.h);
+  if(ghost){ctx.globalAlpha=.4;ctx.fillStyle=COLORS.ghost;ctx.fillRect(ghost.x,ghost.y,player.w,player.h);ctx.globalAlpha=1;}
+  requestAnimationFrame(frame);
+}
+/* ---------- UTIL ---------- */
+function restart(){t=0;hist.length=0;flipEnd=0;ghost=null;player.x=50;player.y=H-50;player.vx=120;player.vy=0;document.getElementById('txt').innerText='Tap to REVERSE 1s';}
+restart();frame();
+</script>
+</body>
+</html>
