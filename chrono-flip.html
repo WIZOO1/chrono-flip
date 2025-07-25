@@ -1,73 +1,90 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<title>ChronoFlip – Flip Time, Meet Your Ghost</title>
+<title>Neon Drift – Audio-Driven Racer</title>
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"/>
 <style>
-  html,body{margin:0;height:100%;background:#000;font-family:Arial,Helvetica,sans-serif;overflow:hidden}
-  #c{display:block;width:100%;height:100%;touch-action:manipulation}
-  #ui{position:fixed;bottom:4%;left:0;right:0;text-align:center;color:#fff;font-size:5vmin}
-  .btn{display:inline-block;background:#0ff;border:none;padding:2vmin 6vmin;border-radius:999px;color:#000;font-weight:700;font-size:4vmin;margin-top:2vmin;cursor:pointer}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:'Courier New',Courier,monospace;color:#0ff}
+  #ui{position:fixed;top:10px;left:10px;font-size:4vmin;z-index:99}
+  #c{display:block;width:100%;height:100%}
+  .btn{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#0ff;border:none;padding:10px 20px;border-radius:20px;color:#000;font-weight:bold}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ui">
-  <div id="txt">Tap to REVERSE 1s</div>
-  <button class="btn" onclick="restart()">Restart</button>
-</div>
+<div id="ui">Press SPACE / TAP to drift</div>
+<button class="btn" onclick="toggleAudio()">🔊 Start Audio</button>
 <script>
-/* ---------- CONFIG ---------- */
-const W=800,H=600,DT=16;               // physics step
-const FLIP_DUR=1000;                   // reverse time length (ms)
-const COLORS={bg:'#111',player:'#0ff',ghost:'#0af',portal:'#0f0',wall:'#444'};
-/* ---------- CANVAS ---------- */
+/* ---------- canvas ---------- */
 const c=document.getElementById('c'),ctx=c.getContext('2d');
-function resize(){c.width=window.innerWidth;c.height=window.innerHeight}
-window.addEventListener('resize',resize);resize();
-/* ---------- LEVEL ---------- */
-const walls=[[100,400,600,40],[300,200,40,200]]; // [x,y,w,h]
-const portal={x:700,y:80,r:30};
-/* ---------- PLAYER ---------- */
-let t=0,flipEnd=0,ghost=null;
-const player={x:50,y:H-50,w:20,h:20,vx:120,vy:0};
-const hist=[]; // record state every frame
-/* ---------- INPUT ---------- */
-c.addEventListener('pointerdown',()=>{
-  if(Date.now()>flipEnd){flipEnd=Date.now()+FLIP_DUR;ghost=hist.pop()||null;}
-});
-/* ---------- LOOP ---------- */
-function frame(){
-  t+=DT;
-  /* physics */
-  player.vy+=0.5; // gravity
-  player.x+=player.vx*(flipEnd>Date.now()?-1:1)*DT/1000;
-  player.y+=player.vy*DT/1000;
-  /* collision walls */
-  walls.forEach(([wx,wy,ww,wh])=>{
-    if(player.x<wx+ww && player.x+player.w>wx && player.y<wy+wh && player.y+player.h>wy){
-      player.vx*=-1;player.vy=Math.min(player.vy,0);
-    }
-  });
-  /* record history (only forward) */
-  if(Date.now()<flipEnd){hist.pop();}else{hist.push({...player});}
-  /* portal check */
-  const dx=player.x-portal.x,dy=player.y-portal.y;
-  if(Math.hypot(dx,dy)<portal.r && ghost && Math.hypot(player.x-ghost.x,player.y-ghost.y)<20){
-    document.getElementById('txt').innerText='🎉 Portal Open – Tap Restart';
+function resize(){c.width=innerWidth;c.height=innerHeight;}
+window.onresize=resize;resize();
+/* ---------- audio ---------- */
+let audioCtx,analyser,dataArray;
+async function toggleAudio(){
+  audioCtx=new(window.AudioContext||webkitAudioContext)();
+  analyser=audioCtx.createAnalyser();
+  analyser.fftSize=256;
+  dataArray=new Uint8Array(analyser.frequencyBinCount);
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    // fallback: silent oscillator
+    const osc=audioCtx.createOscillator();osc.start();
+    stream=osc;
   }
-  /* draw */
-  ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,c.width,c.height);
-  walls.forEach(([x,y,w,h])=>{ctx.fillStyle=COLORS.wall;ctx.fillRect(x,y,w,h);});
-  ctx.beginPath();ctx.arc(portal.x,portal.y,portal.r,0,Math.PI*2);ctx.fillStyle=COLORS.portal;ctx.fill();
-  ctx.fillStyle=COLORS.player;ctx.fillRect(player.x,player.y,player.w,player.h);
-  if(ghost){ctx.globalAlpha=.4;ctx.fillStyle=COLORS.ghost;ctx.fillRect(ghost.x,ghost.y,player.w,player.h);ctx.globalAlpha=1;}
+  const src=audioCtx.createMediaStreamSource(stream);
+  src.connect(analyser);
+}
+/* ---------- game vars ---------- */
+let t=0,road=[],speed=1,score=0,dead=false;
+const ROAD_SEG=1000,ROAD_W=0.5;
+/* ---------- road init ---------- */
+for(let i=0;i<ROAD_SEG;i++){
+  road.push({x:0,y:i,z:i});
+}
+/* ---------- input ---------- */
+let drift=false;
+window.addEventListener('keydown',e=>{if(e.code==='Space')drift=true;});
+window.addEventListener('keyup',e=>{if(e.code==='Space')drift=false;});
+window.addEventListener('pointerdown',()=>drift=true);
+window.addEventListener('pointerup',()=>drift=false);
+
+/* ---------- loop ---------- */
+function frame(){
+  if(!analyser){requestAnimationFrame(frame);return;}
+  analyser.getByteFrequencyData(dataArray);
+  const bass=dataArray.slice(0,8).reduce((a,b)=>a+b,0)/8;
+  speed=0.5+bass/255*2.5;
+  if(dead){ctx.fillStyle='#000';ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='#f00';ctx.font='10vmin monospace';ctx.textAlign='center';ctx.fillText('GAME OVER',c.width/2,c.height/2);requestAnimationFrame(frame);return;}
+  t+=speed;
+  ctx.fillStyle='#000';ctx.fillRect(0,0,c.width,c.height);
+  const playerX=drift?-0.3:0;
+  /* draw road */
+  for(let i=0;i<ROAD_SEG;i++){
+    const seg=road[(i+Math.floor(t))%ROAD_SEG];
+    const z=seg.z-t;
+    if(z<0.1)continue;
+    const scale=1/z;
+    const x1=c.width/2+(seg.x+playerX-ROAD_W)*scale*c.width;
+    const x2=c.width/2+(seg.x+playerX+ROAD_W)*scale*c.width;
+    const y=c.height-(1/z)*c.height;
+    const hue=(i*2+t*2)%360;
+    ctx.fillStyle=`hsl(${hue},100%,50%)`;
+    ctx.beginPath();ctx.moveTo(x1,y);ctx.lineTo(x2,y);ctx.lineTo(c.width/2,c.height);ctx.closePath();ctx.fill();
+  }
+  /* walls */
+  const wall=Math.sin(t*0.05)*0.6;
+  if(Math.abs(playerX-wall)>0.45){dead=true;}
+  score+=speed;
+  ctx.fillStyle='#0ff';
+  ctx.font='5vmin monospace';
+  ctx.fillText(`Score ${Math.floor(score)}`,20,50);
   requestAnimationFrame(frame);
 }
-/* ---------- UTIL ---------- */
-function restart(){t=0;hist.length=0;flipEnd=0;ghost=null;player.x=50;player.y=H-50;player.vx=120;player.vy=0;document.getElementById('txt').innerText='Tap to REVERSE 1s';}
-restart();frame();
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
